@@ -27,11 +27,11 @@ Two listeners are wired: one inside each spike ThreadGroup, writing to `results/
 - `{StudentID}_Spike_{YYYYMMDD}.jmx` — main test plan
 - `strike_users.csv` — the data-driven source for the spike plan, **independent from `../load/load_users.csv`**
 
-> **Why a different CSV?** The Strike plan needs more rows than the Load plan to keep VU -> row binding stable under 300 concurrent threads without constant recycling mid-burst. `strike_users.csv` has **500 data rows** that cycle through the same 50 seeded `perf-user-NNN@load.com` accounts (10 reads per user during Burst B), while rotating through a much wider keyword set. That extra keyword variety stresses the SQLite `LIKE '%kw%'` query in different cache paths.
+> **Why a different CSV?** The Strike plan needs more rows than the Load plan to keep VU -> row binding stable under 300 concurrent threads without constant recycling mid-burst. `strike_users.csv` has **500 data rows**, one per seeded `perf-user-NNN@load.com` account (NNN = 001..500), rotating through a much wider keyword set. The extra rows (vs. Load's 50) plus the `shareMode=currentThread` + `recycle=true` setup means each VU holds its own iterator and re-uses its own user across iterations of the same burst.
 
 ### `strike_users.csv` keyword mix
 
-500 rows, distributed roughly:
+500 rows (one per seeded `perf-user-NNN@load.com` account, NNN = 001..500), distributed:
 
 | Bucket                              | Count | %    | Behaviour against seeded catalog                                                                                                                                                              |
 |-------------------------------------|-------|------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -43,9 +43,7 @@ Total unique keywords: 73. Password column is constant `Newpass123!` to match th
 
 ### Known limit: CSV vs. seeded-user count
 
-The CSV currently cycles through **only 50** unique accounts (`perf-user-001..050@load.com`), but **Spike-B runs 300 concurrent VUs**. With `shareMode=currentThread` and `recycle=true`, every VU always gets a row, but during Burst B ~6 threads land on the same account at the same time. The flow stays safe (the `forgot -> reset -> login` chain happily resets the password and re-extracts a JWT for each thread), but you'll see account-lockout contention (`login_attempts >= 3` -> 3-min lock) inside Spike-B because some accounts log in many times within the 30-second burst.
-
-**If you want clean per-VU authentication behavior** (each VU holds its own account, no cross-thread lockouts), grow `database.js`'s seeder from 50 to ≥300 perf-users AND extend this CSV accordingly. That is a backend-side change and was intentionally **not** done in this patch.
+The CSV now uses **500** unique accounts (`perf-user-001..500@load.com`), which matches the `database.js` seeder. **Spike-B runs 300 concurrent VUs** — with `shareMode=currentThread` and `recycle=true`, each VU always gets a row, and during Burst B some accounts will be held by multiple threads only if the burst exceeds 500 VU (it doesn't, so the per-VU authentication behavior is clean). The forgot -> reset -> login chain resets the password and re-extracts a JWT per thread on each iteration, so the flow stays safe.
 
 ## Workflow mapped to endpoint groups
 
@@ -70,7 +68,7 @@ The CSV currently cycles through **only 50** unique accounts (`perf-user-001..05
 1. Make sure the backend is running **with a freshly-seeded DB**:
    ```
    cd eshop-sut\backend
-   node database.js       # drops + re-creates every table, seeds 50 perf users
+   node database.js       # drops + re-creates every table, seeds 500 perf users
    node server.js         # http://localhost:3000
    ```
 2. Rename `{StudentID}_Spike_{YYYYMMDD}.jmx` to your real StudentID + today's date before running.

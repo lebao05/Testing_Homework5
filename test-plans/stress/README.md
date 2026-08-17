@@ -47,17 +47,17 @@ Listeners: `Aggregate Report` (`StatVisualizer` — verified class name for JMet
 - `{StudentID}_Stress_{YYYYMMDD}.jmx` — main test plan
 - `stress_users.csv` — the data-driven source for this plan, **independent from `../load/load_users.csv` and `../strike/strike_users.csv`**
 
-> **Why a different CSV?** Stress runs 200 VU sustained for 10 min with `loops=-1` — each VU runs the 5-sampler flow as many times as it can in those 10 minutes. With 1000 data rows cycling through 50 seeded accounts, each `perf-user-NNN@load.com` is reused ~20 times during the 30 s ramp-up alone and ~250 times during the full 10 min soak. That heavy reuse is **exactly the point** of stress testing: hit the same DB rows repeatedly to surface contention, token-table bloat, and DB-row hot spots that Load/Spike never see.
+> **Why a different CSV?** Stress runs 200 VU sustained for 10 min with `loops=-1` — each VU runs the 5-sampler flow as many times as it can in those 10 minutes. With 500 unique data rows, each `perf-user-NNN@load.com` (NNN = 001..500) is reused many times during the soak via `CSVDataSet` `recycle=true` + `shareMode=currentThread` (each thread holds its own pointer and cycles independently). That heavy reuse is **exactly the point** of stress testing: hit the same DB rows repeatedly to surface contention, token-table bloat, and DB-row hot spots that Load/Spike never see.
 
 ### `stress_users.csv` keyword mix
 
-1000 rows, distributed roughly:
+500 rows (one per seeded `perf-user-NNN@load.com` account, NNN = 001..500), distributed:
 
 | Bucket                              | Count | %    | Behaviour against seeded catalog                                                                                                                                                              |
 |-------------------------------------|-------|------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Hits (substrings of product names)  | 300   | 30%  | Returns >=1 row from `/api/products?search=`. Examples: `iPhone`, `Pro`, `Max`, `S24`, `M3`, `M`, `15`, `2`, `Phone`, `Keychron`.                                                            |
-| Misses (real-shopper terms)         | 600   | 60%  | Returns `[]`. Examples: `ao thun`, `giay the thao`, `laptop`, `dien thoai`, `tai nghe`, etc. — same Vietnamese terms as Load and Strike, stressing the empty-result LIKE path during the soak.   |
-| LIKE-wildcards and SQL-noise chars  | 100   | 10%  | `_`, `%`, `'`, `"`, `;`, `--`. The `_` is a real `LIKE` wildcard (matches any single char); the others should each return `[]` without breaking the SQL.                                       |
+| Hits (substrings of product names)  | 150   | 30%  | Returns >=1 row from `/api/products?search=`. Examples: `iPhone`, `Pro`, `Max`, `S24`, `M3`, `M`, `15`, `2`, `Phone`, `Keychron`.                                                            |
+| Misses (real-shopper terms)         | 300   | 60%  | Returns `[]`. Examples: `ao thun`, `giay the thao`, `laptop`, `dien thoai`, `tai nghe`, etc. — same Vietnamese terms as Load and Strike, stressing the empty-result LIKE path during the soak.   |
+| LIKE-wildcards and SQL-noise chars  | 50    | 10%  | `_`, `%`, `'`, `"`, `;`, `--`. The `_` is a real `LIKE` wildcard (matches any single char); the others should each return `[]` without breaking the SQL.                                       |
 
 Total unique keywords: 73. Password column is constant `Newpass123!` to match the Load and Spike plans.
 
@@ -66,7 +66,7 @@ Total unique keywords: 73. Password column is constant `Newpass123!` to match th
 1. Make sure the backend is running **with a freshly-seeded DB**:
    ```
    cd eshop-sut\backend
-   node database.js       # drops + re-creates every table, seeds 50 perf users
+   node database.js       # drops + re-creates every table, seeds 500 perf users
    node server.js         # http://localhost:3000
    ```
 2. (Optional) Capture a baseline of the SQLite file size before the run:
