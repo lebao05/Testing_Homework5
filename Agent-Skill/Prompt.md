@@ -1,0 +1,1 @@
+Generate testplan for workflow register -> search product -> add to cart,run and give me report
